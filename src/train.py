@@ -12,12 +12,71 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.cuda.amp import autocast, GradScaler
 
-from data import CTRDataset
-from models import DCN_SEQ_Model
+try:  # Supports both `python src/train.py` and `python -m src.train`.
+    from .config import (
+        DEFAULT_BATCH_SIZE,
+        DEFAULT_CATEGORY_CARDINALITY_LIMIT,
+        DEFAULT_CROSS_EXPERTS,
+        DEFAULT_CROSS_LAYERS,
+        DEFAULT_CROSS_LOW_RANK,
+        DEFAULT_DEEP_UNITS,
+        DEFAULT_DROPOUT,
+        DEFAULT_DEVICE,
+        DEFAULT_EPOCHS,
+        DEFAULT_HASH_BUCKETS,
+        DEFAULT_ID_COLUMN,
+        DEFAULT_LABEL_COLUMN,
+        DEFAULT_LEARNING_RATE,
+        DEFAULT_MAX_SEQUENCE_LENGTH,
+        DEFAULT_META_PATH,
+        DEFAULT_NUM_WORKERS,
+        DEFAULT_OUTPUT_PATH,
+        DEFAULT_PATIENCE,
+        DEFAULT_SEED,
+        DEFAULT_SEQUENCE_COLUMN,
+        DEFAULT_SEQUENCE_EMBEDDING_DIM,
+        DEFAULT_SAMPLE_SUBSET,
+        DEFAULT_TEST_PATH,
+        DEFAULT_TEST_SIZE,
+        DEFAULT_TRAIN_PATH,
+    )
+    from .data import CTRDataset
+    from .models import DCN_SEQ_Model
+except ImportError:  # Legacy script execution from the src directory.
+    from config import (
+        DEFAULT_BATCH_SIZE,
+        DEFAULT_CATEGORY_CARDINALITY_LIMIT,
+        DEFAULT_CROSS_EXPERTS,
+        DEFAULT_CROSS_LAYERS,
+        DEFAULT_CROSS_LOW_RANK,
+        DEFAULT_DEEP_UNITS,
+        DEFAULT_DROPOUT,
+        DEFAULT_DEVICE,
+        DEFAULT_EPOCHS,
+        DEFAULT_HASH_BUCKETS,
+        DEFAULT_ID_COLUMN,
+        DEFAULT_LABEL_COLUMN,
+        DEFAULT_LEARNING_RATE,
+        DEFAULT_MAX_SEQUENCE_LENGTH,
+        DEFAULT_META_PATH,
+        DEFAULT_NUM_WORKERS,
+        DEFAULT_OUTPUT_PATH,
+        DEFAULT_PATIENCE,
+        DEFAULT_SEED,
+        DEFAULT_SEQUENCE_COLUMN,
+        DEFAULT_SEQUENCE_EMBEDDING_DIM,
+        DEFAULT_SAMPLE_SUBSET,
+        DEFAULT_TEST_PATH,
+        DEFAULT_TEST_SIZE,
+        DEFAULT_TRAIN_PATH,
+    )
+    from data import CTRDataset
+    from models import DCN_SEQ_Model
 
 warnings.filterwarnings("ignore")
 
-def set_seed(seed=42):
+def set_seed(seed=DEFAULT_SEED):
+    """Set the legacy deterministic training seed across supported libraries."""
     import random
     random.seed(seed)
     os.environ["PYTHONHASHSEED"] = str(seed)
@@ -28,6 +87,7 @@ def set_seed(seed=42):
     torch.backends.cudnn.benchmark = False
 
 def infer_device(arg="auto"):
+    """Resolve the requested compute device without changing legacy behaviour."""
     if arg == "cpu": return torch.device("cpu")
     if arg == "cuda" or (arg == "auto" and torch.cuda.is_available()):
         print("Using CUDA")
@@ -35,7 +95,23 @@ def infer_device(arg="auto"):
     print("Using CPU")
     return torch.device("cpu")
 
+
+def move_features_to_device(xc, cats, seq, device):
+    """Move one dataset batch to the selected device."""
+    xc = xc.to(device, non_blocking=True)
+    seq = seq.to(device, non_blocking=True)
+    cats = {name: value.to(device, non_blocking=True) for name, value in cats.items()}
+    return xc, cats, seq
+
+
+def logits_to_probabilities(logits):
+    """Convert logits to the finite NumPy probabilities used by legacy metrics."""
+    probabilities = torch.sigmoid(logits).detach().cpu().numpy().astype(np.float64)
+    return np.nan_to_num(probabilities, nan=0.0, posinf=1.0, neginf=0.0)
+
+
 def main(args):
+    """Train the selected sequence backbone and write predictions plus metadata."""
     set_seed(args.seed)
     device = infer_device(args.device)
 
@@ -134,8 +210,8 @@ def main(args):
         model.train()
         tr_loss = 0.0
         for xc, cats, seq, y in dl_tr:
-            xc, seq, y = xc.to(device, non_blocking=True), seq.to(device, non_blocking=True), y.to(device, non_blocking=True)
-            cats_dev = {k: v.to(device, non_blocking=True) for k, v in cats.items()}
+            xc, cats_dev, seq = move_features_to_device(xc, cats, seq, device)
+            y = y.to(device, non_blocking=True)
             
             optimizer.zero_grad(set_to_none=True)
             with autocast(enabled=(device.type == "cuda")):
@@ -156,15 +232,12 @@ def main(args):
         ys, ps = [], []
         with torch.no_grad():
             for xc, cats, seq, y in dl_va:
-                xc, seq = xc.to(device, non_blocking=True), seq.to(device, non_blocking=True)
-                cats_dev = {k: v.to(device, non_blocking=True) for k, v in cats.items()}
+                xc, cats_dev, seq = move_features_to_device(xc, cats, seq, device)
                 with autocast(enabled=(device.type == "cuda")):
                     logits = model(xc, cats_dev, seq)
                     loss = criterion(logits, y.to(device))
-                    prob = torch.sigmoid(logits)
                     
-                p = prob.detach().cpu().numpy().astype(np.float64)
-                p = np.nan_to_num(p, nan=0.0, posinf=1.0, neginf=0.0)
+                p = logits_to_probabilities(logits)
                 va_loss += loss.item() * len(y)
                 ys.append(y.numpy())
                 ps.append(p)
@@ -195,13 +268,10 @@ def main(args):
     probs = []
     with torch.no_grad():
         for xc, cats, seq in dl_te:
-            xc, seq = xc.to(device, non_blocking=True), seq.to(device, non_blocking=True)
-            cats_dev = {k: v.to(device, non_blocking=True) for k, v in cats.items()}
+            xc, cats_dev, seq = move_features_to_device(xc, cats, seq, device)
             with autocast(enabled=(device.type == "cuda")):
                 logits = model(xc, cats_dev, seq)
-                prob = torch.sigmoid(logits)
-            p = prob.detach().cpu().numpy().astype(np.float64)
-            p = np.nan_to_num(p, nan=0.0, posinf=1.0, neginf=0.0)
+            p = logits_to_probabilities(logits)
             probs.append(p)
     probs = np.concatenate(probs)
 
@@ -229,33 +299,34 @@ def main(args):
         json.dump(meta, f, ensure_ascii=False, indent=2)
     print(f"[7/7] Done. \n - {args.output_path}\n - {args.meta_path}")
 
-if __name__ == "__main__":
+def build_parser():
+    """Create the CLI parser using the preserved experiment defaults."""
     parser = argparse.ArgumentParser(description="CTR Prediction Training Pipeline")
-    parser.add_argument("--train_path", type=str, default="../train.parquet")
-    parser.add_argument("--test_path", type=str, default="../test.parquet")
-    parser.add_argument("--output_path", type=str, default="./submit_dcn_seq.csv")
-    parser.add_argument("--meta_path", type=str, default="./meta_dcn_seq.json")
-    parser.add_argument("--label_col", type=str, default="clicked")
-    parser.add_argument("--seq_col", type=str, default="seq")
-    parser.add_argument("--id_col", type=str, default="ID")
-    parser.add_argument("--sample_subset", type=float, default=1.0)
-    parser.add_argument("--test_size", type=float, default=0.15)
-    parser.add_argument("--cat_card_max", type=int, default=200000)
-    parser.add_argument("--max_seq_len", type=int, default=50)
-    parser.add_argument("--hash_buckets", type=int, default=262144)
-    parser.add_argument("--seq_emb_dim", type=int, default=64)
-    parser.add_argument("--deep_units", type=int, nargs="+", default=[512, 256, 128])
-    parser.add_argument("--cross_layers", type=int, default=3)
-    parser.add_argument("--cross_low_rank", type=int, default=32)
-    parser.add_argument("--cross_num_experts", type=int, default=4)
-    parser.add_argument("--dropout", type=float, default=0.2)
-    parser.add_argument("--epochs", type=int, default=3)
-    parser.add_argument("--batch_size", type=int, default=512)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--patience", type=int, default=2)
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--device", type=str, default="auto")
-    parser.add_argument("--num_workers", type=int, default=0)
+    parser.add_argument("--train_path", type=str, default=DEFAULT_TRAIN_PATH)
+    parser.add_argument("--test_path", type=str, default=DEFAULT_TEST_PATH)
+    parser.add_argument("--output_path", type=str, default=DEFAULT_OUTPUT_PATH)
+    parser.add_argument("--meta_path", type=str, default=DEFAULT_META_PATH)
+    parser.add_argument("--label_col", type=str, default=DEFAULT_LABEL_COLUMN)
+    parser.add_argument("--seq_col", type=str, default=DEFAULT_SEQUENCE_COLUMN)
+    parser.add_argument("--id_col", type=str, default=DEFAULT_ID_COLUMN)
+    parser.add_argument("--sample_subset", type=float, default=DEFAULT_SAMPLE_SUBSET)
+    parser.add_argument("--test_size", type=float, default=DEFAULT_TEST_SIZE)
+    parser.add_argument("--cat_card_max", type=int, default=DEFAULT_CATEGORY_CARDINALITY_LIMIT)
+    parser.add_argument("--max_seq_len", type=int, default=DEFAULT_MAX_SEQUENCE_LENGTH)
+    parser.add_argument("--hash_buckets", type=int, default=DEFAULT_HASH_BUCKETS)
+    parser.add_argument("--seq_emb_dim", type=int, default=DEFAULT_SEQUENCE_EMBEDDING_DIM)
+    parser.add_argument("--deep_units", type=int, nargs="+", default=DEFAULT_DEEP_UNITS)
+    parser.add_argument("--cross_layers", type=int, default=DEFAULT_CROSS_LAYERS)
+    parser.add_argument("--cross_low_rank", type=int, default=DEFAULT_CROSS_LOW_RANK)
+    parser.add_argument("--cross_num_experts", type=int, default=DEFAULT_CROSS_EXPERTS)
+    parser.add_argument("--dropout", type=float, default=DEFAULT_DROPOUT)
+    parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS)
+    parser.add_argument("--batch_size", type=int, default=DEFAULT_BATCH_SIZE)
+    parser.add_argument("--lr", type=float, default=DEFAULT_LEARNING_RATE)
+    parser.add_argument("--patience", type=int, default=DEFAULT_PATIENCE)
+    parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    parser.add_argument("--device", type=str, default=DEFAULT_DEVICE)
+    parser.add_argument("--num_workers", type=int, default=DEFAULT_NUM_WORKERS)
     parser.add_argument("--pin_memory", action="store_true")
     
     # New arguments for sequence backbones
@@ -265,5 +336,8 @@ if __name__ == "__main__":
     parser.add_argument("--bst_nhead", type=int, default=4, help="Number of heads for BST")
     parser.add_argument("--bst_ffn", type=int, default=128, help="Hidden dim of FFN in BST")
     
-    args = parser.parse_args()
-    main(args)
+    return parser
+
+
+if __name__ == "__main__":
+    main(build_parser().parse_args())

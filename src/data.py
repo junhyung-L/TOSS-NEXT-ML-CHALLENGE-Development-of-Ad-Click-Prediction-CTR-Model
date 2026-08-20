@@ -1,35 +1,67 @@
 import re
+from collections.abc import Mapping, Sequence
+from typing import Any
+
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
-def parse_seq_string(s: str):
-    if s is None: return []
+def parse_seq_string(s: str) -> list[int]:
+    """Parse supported sequence-string formats into integer item identifiers."""
+    if s is None:
+        return []
     s = str(s).strip()
-    if not s or s.lower() == "nan": return []
+    if not s or s.lower() == "nan":
+        return []
     if s.startswith("[") and s.endswith("]"):
         s = s[1:-1]
-        toks = [t.strip().strip("'\"") for t in s.split(",")]
+        tokens = [token.strip().strip("'\"") for token in s.split(",")]
     else:
         s = re.sub(r"[^\d]+", ",", s)
-        toks = [t for t in s.split(",") if t]
-    out = []
-    for t in toks:
-        try: out.append(int(t))
-        except Exception:
-            try: out.append(int(float(t)))
-            except Exception: pass
-    return out
+        tokens = [token for token in s.split(",") if token]
 
-def seq_to_ids_hash(lst, max_len=50, hash_buckets=262144, pad_id=0, seq_base=2):
-    ids = [seq_base + (int(t) % hash_buckets) for t in lst][-max_len:]
+    parsed = []
+    for token in tokens:
+        try:
+            parsed.append(int(token))
+        except Exception:
+            try:
+                parsed.append(int(float(token)))
+            except Exception:
+                pass
+    return parsed
+
+
+def seq_to_ids_hash(
+    values: Sequence[int],
+    max_len: int = 50,
+    hash_buckets: int = 262144,
+    pad_id: int = 0,
+    seq_base: int = 2,
+) -> np.ndarray:
+    """Hash, truncate, and left-pad sequence IDs using the legacy scheme."""
+    ids = [seq_base + (int(value) % hash_buckets) for value in values][-max_len:]
     if len(ids) < max_len:
         ids = [pad_id] * (max_len - len(ids)) + ids
     return np.array(ids, dtype=np.int32)
 
+
 class CTRDataset(Dataset):
-    def __init__(self, df, cont_cols, cat_cols, cat_maps, seq_col, max_seq_len, hash_buckets, cat_cards, label_col=None):
+    """Materialize tabular features and lazily encode one behaviour sequence."""
+
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        cont_cols: Sequence[str],
+        cat_cols: Sequence[str],
+        cat_maps: Mapping[str, Mapping[Any, int]],
+        seq_col: str,
+        max_seq_len: int,
+        hash_buckets: int,
+        cat_cards: Mapping[str, int],
+        label_col: str | None = None,
+    ):
         self.df = df.reset_index(drop=True)
         self.cont_cols, self.cat_cols = cont_cols, cat_cols
         self.cat_maps, self.seq_col = cat_maps, seq_col
@@ -44,10 +76,10 @@ class CTRDataset(Dataset):
         if self.has_label:
             self.y = self.df[self.label_col].astype(np.float32).values
             
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.df)
         
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int):
         xc = torch.from_numpy(self.Xc[idx]) if self.Xc is not None else torch.empty(0)
         cats = {c: torch.tensor(self.Xcats[c][idx], dtype=torch.long) for c in self.cat_cols}
         lst = parse_seq_string(self.df.at[idx, self.seq_col])

@@ -1,140 +1,115 @@
-# 🖱️ TOSS NEXT ML CHALLENGE: Ad Click Prediction (CTR) Model
+# CTR Prediction with DCN-V2 and Sequence Interest Models
 
-[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=flat&logo=pytorch&logoColor=white)](https://pytorch.org/)
-[![Status](https://img.shields.io/badge/Status-Completed-success.svg)]()
+[한국어](README.ko.md)
 
-## 🚀 Executive Summary (TL;DR) (실행 요약)
-- **The Problem**: Predict Ad Click-Through Rate (CTR) for Toss app users, handling extreme class imbalance (pos_weight ~51.4), massive sequence data, and memory constraints.
-- **The Solution**: Developed an advanced hybrid deep learning model combining **DCN-V2 (CrossNetMix)** for explicit feature interactions and **DIN (Deep Interest Network)** with a custom activation unit for user behavior sequence modeling.
-- **The Result**: Achieved a validation AUC of **0.7402** on the custom dataset, proving the effectiveness of the local activation mechanism and memory-safe hash embedding.
+> [Project details](PORTFOLIO.md)
 
-## 💡 Business Impact & Value (비즈니스 임팩트 및 가치)
-In financial super-apps like Toss, precise CTR prediction is directly linked to **revenue optimization** and **user experience**:
-- **Revenue Growth**: A precise CTR model maximizes ad revenue by ensuring that high-value ads are shown to users with the highest probability of clicking.
-- **User Experience**: By recommending ads that align with the user's dynamic interests (captured by DIN), we minimize ad fatigue and maintain high engagement within the financial ecosystem.
-- **Cost Efficiency**: The proposed memory-efficient architecture (Hash Embedding + DCN-V2) ensures that the model can handle massive traffic without exploding cloud infrastructure costs.
+This repository investigates click-through-rate (CTR) prediction using tabular
+features and behavioural sequences. It combines a DCN-V2-style cross/deep
+network with DIN, DIEN, or BST sequence backbones, while retaining compact
+metadata from several experimental runs.
 
-## 🛠 Tech Stack (기술 스택)
-- **Framework**: PyTorch 2.x
-- **Modeling**: DCN-V2 + DIN (Custom Hybrid)
-- **Sequence Processing**: Hash Embedding (262,144 buckets)
-- **Optimization**: AdamW, Cosine Annealing, Mixed Precision (AMP)
+## Problem
 
----
+Given user, inventory, temporal, and historical-sequence features, estimate
+the probability of an advertisement click. The provided training pipeline
+addresses class imbalance with a weighted binary cross-entropy loss and ranks
+models using ROC-AUC and PR-AUC.
 
-## 🔬 1. Problem Definition (문제 정의)
-Predicting whether a user will click on an advertisement (Click-Through Rate or CTR) is the core engine of digital marketing, directly impacting revenue and user experience.
-- **The Challenge**: Predict Ad CTR for Toss app users.
-- **The Complications**: Extreme class imbalance (very few users click on ads compared to those who don't), massive sequence data representing user behavior, and strict memory constraints for production deployment.
-- **Objective**: To build a high-performance deep learning model that accurately predicts CTR while remaining memory-efficient.
-
----
-
-## 🛠️ 2. System Architecture: DCN-V2 + DIN (시스템 아키텍처)
-To capture both cross-feature interactions and the evolution of user interests, we fused two state-of-the-art architectures. This hybrid approach ensures we model both static user profiles and dynamic behavior.
+## Analysis flow
 
 ```mermaid
-graph TD
-    subgraph Input_Features [1. Multi-Modal Inputs]
-        A[User Profile <br> 유저 기본 정보]
-        B[Ad Features <br> 광고 속성]
-        C[Historical Sequences <br> 유저 행동 시퀀스]
-    end
-
-    subgraph Feature_Processing [2. Embedding & Sequence Modeling]
-        D[Hash Embedding <br> 고차원 범주형 처리]
-        E[Sequence Backbone <br> DIN / DIEN / BST]
-        F[Attention Mechanism <br> 동적 관심도 추출]
-    end
-
-    subgraph Deep_Learning_Tower [3. Advanced Architecture]
-        G[DCN-V2 CrossNetMix <br> 명시적 피처 교차]
-        H[Deep MLP Tower <br> 비선형 관계 학습]
-    end
-
-    A & B --> D
-    C --> E
+flowchart LR
+    A[Parquet train/test files<br/>not included] --> B[Stratified train/validation split]
+    B --> C[Continuous and categorical features<br/>+ hashed behaviour sequence]
+    C --> D[DCN-V2 cross and deep towers]
+    C --> E[DIN, DIEN, or BST<br/>sequence encoder]
+    D --> F[CTR prediction head]
     E --> F
-    D & F --> G
-    D & F --> H
-    
-    G & H --> I[CTR Prediction Head <br> 클릭 확률 예측]
-
-    style Input_Features fill:#f9f,stroke:#333,stroke-width:2px
-    style Feature_Processing fill:#bbf,stroke:#333,stroke-width:2px
-    style Deep_Learning_Tower fill:#bfb,stroke:#333,stroke-width:2px
+    F --> G[Validation ROC-AUC and PR-AUC<br/>early stopping]
+    G --> H[Submission CSV and run metadata]
 ```
 
----
+## Implemented approach
 
-## 🛠️ Methodologies & Advanced Architectures (방법론 및 고급 아키텍처)
+- **Feature handling:** continuous values are cast to `float32`; categorical
+  values are mapped from the training split with an out-of-vocabulary index.
+- **Sequence handling:** parsed item histories are truncated/padded to 50 items
+  and hashed into 262,144 buckets to bound embedding vocabulary size.
+- **Model:** `DCN_SEQ_Model` combines CrossNetMix layers, a deep MLP tower, and
+  a selectable DIN, DIEN, or BST interest encoder.
+- **Training:** a stratified 85/15 train/validation split uses seed 42,
+  `BCEWithLogitsLoss(pos_weight=negative/positive)`, AdamW, cosine annealing,
+  and AUC-based early stopping.
 
-We transitioned from standard GBDT models to advanced neural architectures to better handle feature interactions and sequential behaviors. The repository now supports a unified **DCN-V2 (Deep & Cross Network v2)** body with multiple sequence backbones:
+The model implementation is in `src/`; notebooks retain broader experimental
+variants, including DUSIN-labelled runs.
 
-### 1. Deep & Cross Network v2 (DCN-V2)
-- **CrossNetMix**: Utilizes low-rank approximation and mixture-of-experts to learn explicit feature interactions of arbitrary orders efficiently.
-- Combined with a Deep MLP tower to capture implicit non-linear interactions.
+## Retained experiment results
 
-### 2. Supported Sequence Backbones
-You can choose the sequence backbone that best fits the data behavior:
-- **DIN (Deep Interest Network)**: Implements a local activation unit (attention mechanism) to adaptively learn the representation of user interests from historical behaviors w.r.t. a specific candidate ad.
-- **DIEN (Deep Interest Evolution Network)**: Adds a GRU layer to capture the temporal evolution of user interests before applying the attention mechanism.
-- **BST (Behavior Sequence Transformer)**: Leverages the powerful self-attention mechanism of Transformers to capture complex correlations among user behaviors.
+The following are saved validation metadata, not external test-set or
+leaderboard scores. The retained runs use three epochs and full training data
+according to their JSON metadata.
 
-### ⚙️ Big Data Scale & Optimization (빅데이터 스케일 및 최적화)
-- **Hash Embedding**: Used a fixed bucket size of **262,144** for sequence items to prevent Out-Of-Memory (OOM) errors caused by high cardinality.
-- **Imbalance Handling**: Used `BCEWithLogitsLoss` with a calculated `pos_weight` of ~51.4 to force the model to learn from the rare positive click events.
+| Experiment | Validation ROC-AUC | Validation PR-AUC | Evidence |
+|---|---:|---:|---|
+| DCN-V2 + DIEN | 0.7413 | **0.0792** | `results/dcnv2_dien_meta.json` |
+| DCN-V2 + DIN | 0.7402 | 0.0775 | `results/din_dcnv2_meta.json` |
+| DCN-V2 + auto-BST | 0.7403 | 0.0783 | `results/dcnv2_auto_bst_meta.json` |
+| DCN-V2 + DIEN + DUSIN (full) | **0.7417** | 0.0780 | `results/dcnv2_dien_dusin_full_meta.json` |
 
-### 📊 Experiment Benchmarks
-We prototyped and evaluated several state-of-the-art CTR models to find the best approach:
-- **CatBoost + DIN**: Validation AUC **0.7412**, PR-AUC **0.0779** (Best performing hybrid approach).
-- **DCN-V2 + DIN**: Validation AUC **0.7402**, PR-AUC **0.0775** (Deep learning focused).
+The highest recorded ROC-AUC and PR-AUC occur in different configurations, so
+this repository does not establish a single winner across both metrics.
 
----
+## Repository layout
 
-## ⚖️ 4. Engineering Trade-offs & Embedding Stability
-- **Statistical Significance of AUC (+0.001)**:
-  - The validation AUC difference between CatBoost+DIN (0.7412) and DCN-V2+DIN (0.7402) is a marginal 0.001, which is within the statistical margin of error.
-  - In a real-world production environment, choosing a simpler CatBoost model might yield a higher business ROI by avoiding the heavy **inference latency and compute overhead** of deep neural architectures. This project serves as an architectural prototype to investigate whether sequential behavior and explicit feature crossings can be jointly learned.
-- **Hash Embedding Collision Control**:
-  - Utilizing a fixed bucket size of 262k for sequence feature embeddings successfully averted OOM errors. We monitored the **Hash Collision Rate and kept it under 1.2%**, ensuring minimal information loss in the high-cardinality sparse feature space.
-
----
-
-## 🏁 5. Conclusion & Business Impact
-The project successfully demonstrated how to build a production-ready CTR model under extreme constraints.
-- **Outcome**: Achieved a validation AUC of **0.7402** while keeping memory usage within safe limits via hash embeddings.
-- **Impact**: Improving CTR models directly translates to higher ad revenue and better user satisfaction by showing relevant ads. The techniques used here (Low-rank DCN, Hash Embedding) are highly applicable to large-scale recommendation systems.
-
----
-
-## 📁 Repository Structure
 ```text
-├── notebooks/                  # Experimental Notebooks
-│   ├── baseline.ipynb
-│   ├── DCN-V2 + DIN.ipynb     # Main Model (This Document)
-│   ├── DCN-V2 + (DIEN or BST).ipynb
-│   └── dusin(full).ipynb
-├── prior-research/             # Background research and papers
-├── results/                    # Saved models and predictions
-├── src/                        # Production-Ready Source Code
-│   ├── data.py                 # Data loading and preprocessing
-│   ├── models.py               # DCN-V2 & DIN model definitions
-│   └── train.py                # Training loop and evaluation
-└── main.py                     # Master pipeline runner
+.
+├── src/
+│   ├── data.py                 # Dataset, sequence parsing, and hashing
+│   ├── models.py               # DCN-V2-style and sequence model components
+│   └── train.py                # CLI training, validation, and output metadata
+├── notebooks/                  # Exploratory and extended model experiments
+├── results/                    # Retained JSON run metadata
+├── prior-research/             # Background material
+└── main.py                     # Standalone LightGBM feature-engineering stub
 ```
 
-## ⚙️ How to Run
-1. Install dependencies:
-   ```bash
-   pip install torch pandas numpy scikit-learn
-   ```
-2. Run the main notebook:
-   - Open `notebooks/DCN-V2 + DIN.ipynb` and execute cells. It includes dummy data generation if the raw parquet files are missing.
+## How to run
 
-## 👥 Contributors
-- **Junhyung L.** (Project Lead)
+The raw Parquet files are intentionally absent, so exact result reproduction
+cannot be verified from this checkout alone. With compatible source files and
+the required Python packages installed, run the supported CLI from `src/`:
 
----
-*Refactored and polished to meet professional software engineering standards for the [Data Analyst Portfolio](https://github.com/junhyung-L/Portfolio).*
+```powershell
+cd src
+python train.py `
+  --train_path ..\train.parquet `
+  --test_path ..\test.parquet `
+  --output_path ..\submit_dcn_seq.csv `
+  --meta_path ..\meta_dcn_seq.json `
+  --seq_backbone dien
+```
+
+Expected input columns include `clicked` (label), `seq` (behaviour sequence),
+and `ID` (submission identifier); other columns are partitioned by the script.
+Install the import-derived package list with `pip install -r requirements.txt`.
+Exact package versions were not recorded. Shared defaults are documented in
+`src/config.py`; see `research/RUN_MANIFEST.md` for the refactor boundary.
+
+## Limitations
+
+- No raw data, external test labels, leaderboard result, or trained checkpoint
+  is versioned in the repository.
+- The current CLI implements DIN/DIEN/BST selection; some retained DUSIN runs
+  are notebook-based experimental variants.
+- The standalone `main.py` is a LightGBM feature-engineering stub and is not
+  the same end-to-end path as `src/train.py`.
+
+## Documentation
+
+- [Portfolio case study](PORTFOLIO.md)
+- [Project review](docs/PROJECT_REVIEW.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [CV bullets](docs/CV_BULLETS.md)
+- [Run manifest](research/RUN_MANIFEST.md)

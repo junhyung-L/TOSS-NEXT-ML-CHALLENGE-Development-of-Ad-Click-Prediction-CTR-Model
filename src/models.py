@@ -1,11 +1,11 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import numpy as np
 
 PAD_ID = 0
 
 def emb_dim_from_card(card, cap=64):
+    """Return the legacy bounded embedding-dimension heuristic."""
     return int(min(cap, max(8, round(1.6 * (card ** 0.25)))))
 
 class CrossLayerMix(nn.Module):
@@ -42,7 +42,7 @@ class CrossNetMix(nn.Module):
 
 class DINActivationUnit(nn.Module):
     """w_i = MLP([q, k_i, q-k_i, q*k_i])"""
-    def __init__(self, dim_q, dim_k, hidden=[64, 32], dropout=0.0):
+    def __init__(self, dim_q, dim_k, hidden=(64, 32), dropout=0.0):
         super().__init__()
         in_dim = dim_q + dim_k + dim_q + dim_k
         layers = []
@@ -158,9 +158,10 @@ class BSTBackbone(nn.Module):
 class DCN_SEQ_Model(nn.Module):
     def __init__(self, cont_dim, cat_cards, seq_vocab_size, target_name=None,
                  seq_emb_dim=64, seq_backbone="din",
-                 bst_cfg=None, deep_units=[512, 256, 128],
+                 bst_cfg=None, deep_units=None,
                  cross_layers=3, cross_low_rank=32, cross_num_experts=4, dropout=0.2):
         super().__init__()
+        deep_units = [512, 256, 128] if deep_units is None else deep_units
         self.has_cont = cont_dim > 0
         if self.has_cont:
             self.bn = nn.BatchNorm1d(cont_dim)
@@ -246,7 +247,7 @@ class DCN_SEQ_Model(nn.Module):
 # Keep old model for backward compatibility or direct use
 class DCN_DIN_Model(nn.Module):
     def __init__(self, cont_dim, cat_cards, seq_vocab_size, target_name=None,
-                 seq_emb_dim=64, deep_units=[512, 256, 128],
+                 seq_emb_dim=64, deep_units=None,
                  cross_layers=3, cross_low_rank=32, cross_num_experts=4, dropout=0.2):
         super().__init__()
         self.base_model = DCN_SEQ_Model(cont_dim, cat_cards, seq_vocab_size, target_name,

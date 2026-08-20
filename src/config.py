@@ -1,0 +1,35 @@
+"""Shared defaults for the maintained CTR training entry point.
+
+These values mirror the pre-refactor command-line defaults in ``train.py``.
+They are kept in one place to make experiment configuration discoverable.
+"""
+
+DEFAULT_TRAIN_PATH = "../train.parquet"
+DEFAULT_TEST_PATH = "../test.parquet"
+DEFAULT_OUTPUT_PATH = "./submit_dcn_seq.csv"
+DEFAULT_META_PATH = "./meta_dcn_seq.json"
+
+DEFAULT_LABEL_COLUMN = "clicked"
+DEFAULT_SEQUENCE_COLUMN = "seq"
+DEFAULT_ID_COLUMN = "ID"
+
+DEFAULT_TEST_SIZE = 0.15
+DEFAULT_SEED = 42
+DEFAULT_SAMPLE_SUBSET = 1.0
+DEFAULT_CATEGORY_CARDINALITY_LIMIT = 200_000
+DEFAULT_MAX_SEQUENCE_LENGTH = 50
+DEFAULT_HASH_BUCKETS = 262_144
+DEFAULT_SEQUENCE_EMBEDDING_DIM = 64
+DEFAULT_DEEP_UNITS = [512, 256, 128]
+
+DEFAULT_CROSS_LAYERS = 3
+DEFAULT_CROSS_LOW_RANK = 32
+DEFAULT_CROSS_EXPERTS = 4
+DEFAULT_DROPOUT = 0.2
+
+DEFAULT_EPOCHS = 3
+DEFAULT_BATCH_SIZE = 512
+DEFAULT_LEARNING_RATE = 1e-3
+DEFAULT_PATIENCE = 2
+DEFAULT_DEVICE = "auto"
+DEFAULT_NUM_WORKERS = 0

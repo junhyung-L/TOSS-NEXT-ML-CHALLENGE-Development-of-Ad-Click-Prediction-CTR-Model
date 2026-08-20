@@ -9,6 +9,9 @@ __pycache__/
 # Jupyter Notebooks
 .ipynb_checkpoints/
 
+# Private portfolio-analysis notes
+.repo-analysis/
+
 # IDEs
 .vscode/
 .idea/
